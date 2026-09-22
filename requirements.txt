@@ -1,0 +1,24 @@
+# Ядро
+python-dotenv==1.0.1
+
+# RAG: векторный индекс и эмбеддинги
+chromadb==0.5.5
+sentence-transformers==3.0.1
+# Транзитивная зависимость chromadb. Без верхней границы ставится posthog 7.x
+# с несовместимой сигнатурой capture(), и каждое обращение к коллекции печатает
+# "Failed to send telemetry event" поверх вывода ingest.py.
+posthog<4
+
+# Загрузка корпуса
+pypdf==4.3.1
+
+# Протокол вызова инструментов
+mcp==1.2.0
+
+# LLM
+gigachat==0.1.35
+requests==2.32.3
+
+# Каналы доставки
+streamlit==1.38.0
+vkbottle==4.5.2
