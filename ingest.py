@@ -1,3 +1,7 @@
+from __future__ import annotations
+import re
+import unicodedata
+
 """
 ingest.py — сбор исходных данных и наполнение векторного индекса.
 
@@ -62,42 +66,140 @@ READERS = {".txt": read_txt, ".md": read_txt, ".pdf": read_pdf}
 
 # --- Ваша часть (П2) ---
 
-def clean_text(text: str) -> str:
-    r"""Очистить сырой текст перед нарезкой.
+RE_ZERO = re.compile(r"[\u200b\u200c\u200d\ufeff\u00ad]")
+RE_HYPHEN = re.compile(r"(?<=\w)[-‐‑]\s*\n\s*(?=\w)")
+RE_SLIDE = re.compile(r"^\s*\(Слайд\s*\d+\)\s*$", re.M)
+RE_HR = re.compile(r"^\s*[-*_]{3,}\s*$", re.M)
+RE_HEADING = re.compile(r"^\s{0,3}#{1,6}\s*", re.M)
+RE_BOLD = re.compile(r"\*{1,3}([^*\n]+)\*{1,3}")
+RE_ITALIC = re.compile(r"(?<!\w)_{1,3}([^_\n]+)_{1,3}(?!\w)")
+RE_CODE = re.compile(r"`([^`]+)`")
+RE_BULLET = re.compile(r"^\s*[•*]\s+", re.M)
+RE_SPACES = re.compile(r"[ \t]+")
+RE_MULTI_NL = re.compile(r"\n{3,}")
 
-    Что обычно нужно убрать: разрывы слов по переносу строки, повторяющиеся
-    колонтитулы, номера страниц отдельной строкой, цепочки пробелов и пустых строк.
+def clean_text(text: str, *, keep_newlines: bool = True) -> str:
+    text = unicodedata.normalize("NFC", text)
+    text = text.replace("\xa0", " ").replace("\u202f", " ").replace("\u2009", " ")
+    text = RE_ZERO.sub("", text)
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
 
-    Подсказка: начните с re.sub(r"-\n", "", text) и r"\s+" -> " ", посмотрите
-    на результат глазами и добавьте правила под свои исходные данные.
-    """
-    raise NotImplementedError("П2: реализуйте очистку текста")
+    text = RE_HYPHEN.sub("", text)
+    text = RE_SLIDE.sub("", text)
+    text = RE_HR.sub("", text)
+
+    # Markdown
+    text = RE_HEADING.sub("", text)
+    text = RE_BOLD.sub(r"\1", text)
+    text = RE_ITALIC.sub(r"\1", text)
+    text = RE_CODE.sub(r"\1", text)
+    text = RE_BULLET.sub("- ", text)
+
+    # Пробелы
+    text = RE_SPACES.sub(" ", text)
+    text = re.sub(r"\s+([,.;:!?])", r"\1", text)
+
+    if keep_newlines:
+        text = "\n".join(line.strip() for line in text.splitlines())
+        text = RE_MULTI_NL.sub("\n\n", text)
+    else:
+        text = re.sub(r"\s+", " ", text)
+
+    return text.strip()
 
 
 def chunk_text(text: str, size: int = config.CHUNK_SIZE,
                overlap: int = config.CHUNK_OVERLAP) -> list[str]:
-    """Нарезать текст на чанки размером size с перекрытием overlap.
-
-    Перекрытие нужно, чтобы мысль, попавшая на границу нарезки, не потерялась:
-    её хвост окажется в начале следующего чанка.
-
-    Следите за двумя вещами: шаг сдвига равен size - overlap (не size), и
-    overlap обязан быть меньше size, иначе цикл не сойдётся.
+    """Нарезка текста на чанки размером size с перекрытием overlap.
+        Перекрытие нужно, чтобы мысль, попавшая на границу нарезки, не потерялась:
+        её хвост окажется в начале следующего чанка.
     """
-    raise NotImplementedError("П2: реализуйте нарезку с перекрытием")
+    if size <= 0: raise ValueError("size обязан быть положительным")
+    if overlap < 0: raise ValueError("overlap обязан быть положительным")
+    if overlap >= size: raise ValueError("overlap обязан быть меньше size")
+    if not text: return []
 
+    n = len(text)
+    # не сжимать чанк меньше 60% от size (но гарантированно > overlap)
+    min_size = max(overlap + 1, int(size * 0.6))
 
-def detect_category(text: str, source: str) -> str:
-    """Определить рубрику чанка.
+    chunks: list[str] = []
+    start = 0
+    while start < n:
+        hard_end = min(start + size, n)
+        end = hard_end
 
-    Словарь рубрик — ваш проектный выбор, он зависит от домена. Для налогового
-    консультанта это может быть "law" | "faq" | "forms"; для ассистента абитуриента —
-    "admission" | "dormitory" | "schedule".
+        if hard_end < n:
+            window_start = start + min_size
+            # пробуем закончить на предложении
+            sent  = [m.end() for m in re.compile(r"[.!?…](?=\s|$)").finditer(text, window_start, hard_end)]
+            if sent :
+                end = sent[-1]
+            else:
+                # берём последнее слово полностью
+                sp = text.rfind(" ", window_start, hard_end)
+                if sp != -1:
+                    end = sp + 1  # включаем пробел в текущий чанк
 
-    Достаточно правил по имени файла и ключевым словам — LLM здесь не нужна.
-    Пустых категорий быть не должно: заведите рубрику по умолчанию.
+        chunks.append(text[start:end])
+
+        if end >= n:
+            break
+        start = end - overlap
+        if start < 0:
+            start = 0
+
+    return chunks
+
+# Рубрики объявлены на уровне модуля: это часть проектного решения, а не
+# локальная переменная функции. Слова обрезаны до основы.
+RUBRICS: dict[str, list[str]] = {
+    "registration": [
+        "регистрац", "зарегистрир", "постановк на учет",
+        "встать на учет", "снять с учета", "сняти с учета",
+        "стать самозанят", "перейти на нпд", "повторно встать",
+        "лк фл", "госуслуг", "есиа", "паспорт",
+        "еаэс", "украин", "иностранн гражданин", "иностранн гражда",
+        "несовершеннолет", "эмансипац", "14 лет", "18 лет",
+    ],
+    "rates": [
+        "ставк", "4%", "4 %", "6%", "6 %",
+        "налогов баз", "налогов вычет", "бонус",
+        "10 000", "10 тысяч",
+        "ндфл", "ндс", "страхов взнос", "страховой взнос",
+        "единый налоговый платеж", "енп",
+    ],
+    "limits": [
+        "лимит", "2,4 млн", "2.4 млн", "2,4 миллион", "предельн",
+        "не вправе", "не могут применять", "запрет",
+        "подакцизн", "маркировк", "перепродаж",
+        "полезн ископаем", "майнинг", "цифров валют",
+        "утрат права", "утративш",
+    ],
+    "reporting": [
+        "чек", "квитанц", "справк", "кнд", "декларац",
+        "уплат налог", "срок уплат", "28 числа", "12 числа",
+        "штраф", "пени", "автоплатеж", "налогов период",
+        "корректировк", "сводн чек", "аннулир",
+    ],
+}
+DEFAULT_RUBRIC = "general"
+
+def detect_category(text: str, source: str = "") -> str:
+    """Определяет рубрику чанка по правилам.
+
+    source принимается для совместимости с интерфейсом, но в определении
+    рубрики не участвует: ни один файл корпуса не соответствует ровно
+    одной рубрике, поэтому работает только словарь ключевых слов.
     """
-    raise NotImplementedError("П2: реализуйте рубрикацию")
+    if not text: return DEFAULT_RUBRIC
+
+    low = text.lower()
+    scores = {r: sum(low.count(kw) for kw in keys) for r, keys in RUBRICS.items()}
+    best = max(scores.values())
+    
+    if best == 0: return DEFAULT_RUBRIC
+    return max(scores, key=scores.get)
 
 
 # --- Сборка индекса: готова ---

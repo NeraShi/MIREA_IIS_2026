@@ -1,35 +1,98 @@
 [
   {
     "id": 1,
-    "question": "ЗАМЕНИТЕ (П2): вопрос, ответ на который прямо есть в корпусе",
-    "expected_sources": ["имя_файла.pdf"],
+    "question": "Заказчик задерживает оплату за ремонт, хотя акт мы уже подписали. Нужно ли мне платить налог прямо сейчас?",
+    "expected_sources": ["faq.txt"],
     "expected": "",
     "type": "direct"
   },
   {
     "id": 2,
-    "question": "ЗАМЕНИТЕ (П2): вопрос, ответ на который лежит в другом файле",
-    "expected_sources": ["другой_файл.pdf"],
+    "question": "Я случайно ввёл в чек неверную сумму и уже отправил его клиенту. Можно ли что-то исправить?",
+    "expected_sources": ["guide-check.txt"],
     "expected": "",
     "type": "direct"
   },
   {
     "id": 3,
-    "question": "ЗАМЕНИТЕ (П2): вопрос на стыке двух разделов базы знаний",
-    "expected_sources": ["имя_файла.pdf", "другой_файл.pdf"],
+    "question": "Мне 16 лет, хочу подрабатывать репетиторством. Могу ли я оформиться как самозанятый?",
+    "expected_sources": ["who_can_become_npd.txt"],
+    "expected": "",
+    "type": "direct"
+  },
+  {
+    "id": 4,
+    "question": "У меня нет личного кабинета на госуслугах. Как мне зарегистрироваться, если я хочу начать сегодня?",
+    "expected_sources": ["how-to-become-npd.txt"],
+    "expected": "",
+    "type": "direct"
+  },
+  {
+    "id": 5,
+    "question": "Если за месяц у меня вообще не было доходов, придётся ли платить какую-то минимальную сумму?",
+    "expected_sources": ["letter-03-11-11-22839.txt"],
+    "expected": "",
+    "type": "direct"
+  },
+  {
+    "id": 6,
+    "question": "Клиент перечислил мне деньги в цифровых рублях. Когда считается, что я получил доход?",
+    "expected_sources": ["422-fl.txt"],
+    "expected": "",
+    "type": "direct"
+  },
+  {
+    "id": 7,
+    "question": "Я ИП на УСН, хочу перейти на НПД. Что мне нужно сделать с УСН и в какой срок?",
+    "expected_sources": ["faq.txt", "422-fl.txt"],
     "expected": "",
     "type": "cross_section"
   },
   {
-    "id": 4,
-    "question": "ЗАМЕНИТЕ (П2): вопрос с неоднозначной формулировкой",
-    "expected_sources": ["имя_файла.pdf"],
+    "id": 8,
+    "question": "Я превысил лимит 2,4 млн рублей в августе. На какой режим я попадаю и в какой срок я должен уведомить налоговую?",
+    "expected_sources": ["faq.txt", "422-fl.txt"],
+    "expected": "",
+    "type": "cross_section"
+  },
+  {
+    "id": 9,
+    "question": "Клиент вернул оплату и я аннулировал чек. Могу ли я учесть эти расходы у себя, если я организация?",
+    "expected_sources": ["faq.txt", "guide-check.txt"],
+    "expected": "",
+    "type": "cross_section"
+  },
+  {
+    "id": 10,
+    "question": "Что мне будет, если я не заплачу налог вовремя?",
+    "expected_sources": ["faq.txt"],
     "expected": "",
     "type": "ambiguous"
   },
   {
-    "id": 5,
-    "question": "ЗАМЕНИТЕ (П2): вопрос, ответа на который в корпусе НЕТ",
+    "id": 11,
+    "question": "Могу ли я работать и быть самозанятым одновременно?",
+    "expected_sources": ["faq.txt", "422-fl.txt"],
+    "expected": "",
+    "type": "ambiguous"
+  },
+  {
+    "id": 12,
+    "question": "Какие вообще есть ограничения для самозанятых?",
+    "expected_sources": ["422-fl.txt", "faq.txt"],
+    "expected": "",
+    "type": "ambiguous"
+  },
+  {
+    "id": 13,
+    "question": "Хочу стать самозанятым в Беларуси — там тоже работает этот режим?",
+    "expected_sources": [],
+    "expected": "В базе знаний нет ответа на этот вопрос",
+    "type": "out_of_scope"
+  },
+  {
+    "id": 14,
+    "question": "А в Казахстане можно стать самозанятым по российским правилам?",
     "expected_sources": [],
     "expected": "В базе знаний нет ответа на этот вопрос",
     "type": "out_of_scope"

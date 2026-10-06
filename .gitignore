@@ -3,8 +3,6 @@
 
 # Данные, порождаемые запуском
 data/chroma/
-data/raw/*
-!data/raw/README.md
 *.db
 security_logs.txt
 
