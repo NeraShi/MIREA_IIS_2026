@@ -37,7 +37,13 @@ class MCPTools:
         self._timeout = timeout
         self._session: ClientSession | None = None
 
-        self._loop = asyncio.new_event_loop()
+        # Streamlit на Windows ставит политику SelectorEventLoop ради Tornado,
+        # а в ней нет подпроцессов, на которых держится stdio-транспорт MCP.
+        # Цикл здесь свой, только для этого потока, поэтому Proactor не мешает Streamlit.
+        if sys.platform == "win32":
+            self._loop = asyncio.ProactorEventLoop()
+        else:
+            self._loop = asyncio.new_event_loop()
         self._thread = threading.Thread(target=self._spin, daemon=True)
         self._thread.start()
 
