@@ -20,7 +20,7 @@ from mcp.server.fastmcp import FastMCP
 
 import config
 
-mcp = FastMCP("iis-rag")
+mcp = FastMCP("iis-rag", host="127.0.0.1", port=8765)
 
 
 def _to_chunks(result: dict) -> list[dict]:
@@ -77,4 +77,4 @@ def get_history(session_id: str, n: int = config.MEMORY_WINDOW) -> list[dict]:
 
 
 if __name__ == "__main__":
-    mcp.run()
+    mcp.run(transport="streamable-http")

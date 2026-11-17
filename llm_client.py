@@ -19,14 +19,14 @@ llm_client.py — доступ к языковой модели за общим 
 Зачем абстракция. Учебные квоты кончаются, сеть в аудитории падает, а занятие
 должно продолжаться. Ollama — фолбэк, который работает офлайн. Заодно это
 материал для сравнения авторегрессионной модели и reasoning-модели из Л4:
-у DeepSeek-R1 в ответе виден блок рассуждений, у GigaChat — нет.
+у llama3.2:3b в ответе виден блок рассуждений, у GigaChat — нет.
 
 Третий бэкенд — fake_llm.FakeClient, офлайн-заглушка без сети и ключей. Она
 нужна для отладки, когда недоступны оба клиента, и ваши реализации не заменяет:
 работа, сданная на LLM_BACKEND=fake, не принимается.
 """
 
-import config
+import config, re, requests
 from contracts import LLMClient
 
 
@@ -67,18 +67,48 @@ class OllamaClient:
         self.model = config.OLLAMA_MODEL
         self.host = config.OLLAMA_HOST
 
-    def generate(self, messages: list[dict], temperature: float = 0.3) -> str:
-        """POST на {host}/api/chat с телом {"model", "messages", "stream": False}.
+    _THINK_RE = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
 
-        Ответ — в data["message"]["content"].
-        У reasoning-моделей ответ приходит с блоком <think>...</think> — решите,
-        показывать его пользователю или вырезать, и обоснуйте выбор на защите.
-        """
-        raise NotImplementedError("П4: реализуйте вызов Ollama")
+    def generate(self, messages: list[dict], temperature: float = 0.3) -> str:
+        url = f"{self.host}/api/chat"
+        payload = {
+            "model": self.model,
+            "messages": messages,
+            "stream": False,
+            "options": {"temperature": temperature},
+        }
+        try:
+            response = requests.post(url, json=payload, timeout=300)
+            response.raise_for_status()
+            data = response.json()
+            content = (data.get("message", {}).get("content") or "").strip()
+
+            # llama3.2:3b - reasoning-модель: рассуждения приходят либо в поле
+            # message.thinking, либо внутри текста в тегах <think>...</think>.
+            # Для ответа пользователю их убираем - они служебные и мешают
+            # читать ответ со ссылками на источники
+            content = self._THINK_RE.sub("", content).strip()
+
+            if not content:
+                return "Ошибка: Ollama вернула пустой ответ."
+            return content
+
+        except requests.exceptions.Timeout:
+            return "Ошибка: сервис Ollama не ответил за отведённое время."
+        except requests.exceptions.ConnectionError:
+            return f"Ошибка: не удалось подключиться к Ollama по адресу {self.host}."
+        except requests.exceptions.HTTPError as e:
+            return f"Ошибка HTTP от Ollama: {e}."
+        except (ValueError, KeyError) as e:
+            return f"Ошибка: некорректный ответ от Ollama ({e})."
 
     def count_tokens(self, text: str) -> int:
-        """Оценка длины в токенах — та же логика, что и в GigaChatClient."""
-        raise NotImplementedError("П4: реализуйте подсчёт токенов")
+        """Грубая оценка: ~1 токен на 3 символа русского текста.
+
+        Точность здесь не нужна - важно видеть порядок величины и связать
+        со стоимостью на П8. Для пустой строки возвращаем 0.
+        """
+        return len(text) // 3
 
 
 def build_client() -> LLMClient:

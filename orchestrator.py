@@ -44,7 +44,7 @@ class Orchestrator:
     ROLES: dict[str, dict] = {
         "analyst": {
             "description": "ищет факты в базе знаний и отвечает со ссылками на источники",
-            "temperature": 0.2, 
+            "temperature": 0, 
             "filters": {},  # {} = искать по всему индексу
         },
         "clarifier": {
