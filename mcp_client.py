@@ -1,99 +1,58 @@
 """
 mcp_client.py — синхронная обёртка над MCP-сервером.
 
-Транспорт: streamable-http (127.0.0.1:8765). stdio-транспорт нестабилен
-на Windows + Python 3.13 (OSError 22 / TimeoutError на кириллице), поэтому
-сервер поднимается отдельным процессом по HTTP. Чтобы Orchestrator()
-оставался самодостаточным (как в шаблоне), сервер запускается автоматически
-при первом MCPTools(), если порт ещё не слушается, и гасится при close()
-или выходе процесса.
+ГОТОВ ЦЕЛИКОМ. Студент его не пишет и не правит.
+
+Зачем он нужен. MCP-сессия асинхронная и живёт поверх stdio подпроцесса, а
+Streamlit и оркестратор — синхронные. Открывать сессию на каждый вызов нельзя:
+подпроцесс заново поднимал бы ChromaDB и модель эмбеддингов, и один ответ занимал
+бы десятки секунд. Поэтому здесь один фоновый поток с вечным event loop, в нём одна
+долгоживущая сессия, а наружу торчат обычные синхронные методы.
+
+Использование:
+    tools = MCPTools()
+    chunks = tools.search("как оформить самозанятость")
+    tools.close()
 """
 
 import asyncio
-import atexit
 import json
-import socket
-import subprocess
 import sys
 import threading
-import time
 from contextlib import AsyncExitStack
 from pathlib import Path
 
-from mcp import ClientSession
-from mcp.client.streamable_http import streamablehttp_client
+from mcp import ClientSession, StdioServerParameters
+from mcp.client.stdio import stdio_client
 
 from contracts import Chunk, Message
 
 _SERVER = str(Path(__file__).parent / "mcp_server.py")
-_HOST = "127.0.0.1"
-_PORT = 8765
-_URL = f"http://{_HOST}:{_PORT}/mcp"
 
 
 class MCPTools:
     """Синхронный клиент MCP-сервера знаний."""
 
     def __init__(self, server_script: str = _SERVER, timeout: float = 120.0):
-        self._server_script = server_script
         self._timeout = timeout
         self._session: ClientSession | None = None
-        self._proc: subprocess.Popen | None = None
 
-        # Самодостаточность: если сервер ещё не слушает порт — поднимаем его.
-        self._ensure_server()
-
-        self._loop = asyncio.new_event_loop()
+        # Streamlit на Windows ставит политику SelectorEventLoop ради Tornado,
+        # а в ней нет подпроцессов, на которых держится stdio-транспорт MCP.
+        # Цикл здесь свой, только для этого потока, поэтому Proactor не мешает Streamlit.
+        if sys.platform == "win32":
+            self._loop = asyncio.ProactorEventLoop()
+        else:
+            self._loop = asyncio.new_event_loop()
         self._thread = threading.Thread(target=self._spin, daemon=True)
         self._thread.start()
+
         self._ready = asyncio.Event()
         self._stop = asyncio.Event()
-        self._serving = self._submit(self._serve())
+        self._serving = self._submit(self._serve(server_script))
         self._submit(self._wait_ready()).result(timeout=timeout)
 
-    # --- автозапуск сервера ---
-
-    def _ensure_server(self) -> None:
-        if self._port_open():
-            # Сервер уже запущен — другим Orchestrator или вручную.
-            # Мы его не гасим: им владеет тот, кто запустил.
-            return
-        log_path = Path(self._server_script).parent / "data" / "mcp_server.log"
-        log_path.parent.mkdir(parents=True, exist_ok=True)
-        log_file = open(log_path, "w", encoding="utf-8")
-        self._proc = subprocess.Popen(
-            [sys.executable, self._server_script],
-            stdout=log_file,
-            stderr=log_file,
-        )
-        atexit.register(self._shutdown_server)
-
-        for _ in range(120):  # 60 секунд
-            if self._port_open():
-                return
-            if self._proc.poll() is not None:
-                raise RuntimeError(
-                    f"mcp_server.py упал с кодом {self._proc.returncode}. "
-                    f"Смотрите {log_path}."
-                )
-            time.sleep(0.5)
-        raise RuntimeError(f"mcp_server.py не поднялся за 60 секунд. Смотрите {log_path}.")
-
-    @staticmethod
-    def _port_open() -> bool:
-        with socket.socket() as s:
-            s.settimeout(0.5)
-            return s.connect_ex((_HOST, _PORT)) == 0
-
-    def _shutdown_server(self) -> None:
-        if self._proc and self._proc.poll() is None:
-            self._proc.terminate()
-            try:
-                self._proc.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                self._proc.kill()
-
-    # --- механика сессии ---
+    # --- внутренняя механика ---
 
     def _spin(self) -> None:
         asyncio.set_event_loop(self._loop)
@@ -102,11 +61,16 @@ class MCPTools:
     def _submit(self, coro):
         return asyncio.run_coroutine_threadsafe(coro, self._loop)
 
-    async def _serve(self) -> None:
+    async def _serve(self, server_script: str) -> None:
+        """Держит сессию открытой до close().
+
+        Сессия открывается и закрывается внутри одной задачи. Иначе на выходе
+        получается RuntimeError: стек ресурсов внутри опирается на cancel scope
+        anyio, а тот обязан закрываться в той же задаче, в которой открыт.
+        """
+        params = StdioServerParameters(command=sys.executable, args=[server_script])
         async with AsyncExitStack() as stack:
-            read, write, _ = await stack.enter_async_context(
-                streamablehttp_client(_URL)
-            )
+            read, write = await stack.enter_async_context(stdio_client(params))
             self._session = await stack.enter_async_context(ClientSession(read, write))
             await self._session.initialize()
             self._ready.set()
@@ -161,4 +125,3 @@ class MCPTools:
             self._loop.call_soon_threadsafe(self._stop.set)
             self._serving.result(timeout=self._timeout)
         self._loop.call_soon_threadsafe(self._loop.stop)
-        self._shutdown_server()
