@@ -47,36 +47,52 @@ def connect() -> sqlite3.Connection:
 
 
 def create_schema() -> None:
-    """Создать таблицу messages, если её ещё нет.
-
-    Подсказка: SCHEMA выше уже написана — выполните её и не забудьте commit().
-    """
-    # TODO (П5): выполнить SCHEMA
-    return None
+    """Создать таблицу messages, если её ещё нет."""
+    conn = connect()
+    try:
+        conn.executescript(SCHEMA)
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def save(session_id: str, role: str, content: str) -> None:
-    """Сохранить одну реплику диалога.
-
-    timestamp пишите в ISO-формате: datetime.now().isoformat(timespec="seconds").
-    Пользуйтесь параметрами запроса (?, ?, ?), а не конкатенацией строк —
-    иначе получите SQL-инъекцию в дополнение к prompt-инъекции из П7.
-    """
-    # TODO (П5): вставить реплику в messages
-    return None
+    """Сохранить одну реплику. Параметры — через ?, не конкатенацией."""
+    timestamp = datetime.now().isoformat(timespec="seconds")
+    conn = connect()
+    try:
+        conn.execute(
+            "INSERT INTO messages (session_id, role, content, timestamp) "
+            "VALUES (?, ?, ?, ?)",
+            (session_id, role, content, timestamp),
+        )
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def window(session_id: str, n: int = config.MEMORY_WINDOW) -> list[Message]:
-    """Последние n сообщений сессии в хронологическом порядке.
+    """Последние n сообщений сессии — в хронологическом порядке."""
+    conn = connect()
+    try:
+        rows = conn.execute(
+            "SELECT role, content, timestamp FROM messages "
+            "WHERE session_id = ? ORDER BY id DESC LIMIT ?",
+            (session_id, n),
+        ).fetchall()
+    finally:
+        conn.close()
 
-    Ловушка: ORDER BY id DESC LIMIT n даёт последние n, но в обратном порядке.
-    Разверните результат перед возвратом, иначе LLM прочитает диалог задом наперёд.
-    """
-    # TODO (П5): выбрать последние n сообщений сессии
-    return []
+    # ORDER BY id DESC даёт новое-сверху; разворачиваем перед возвратом.
+    rows.reverse()
+    return [Message(role=r[0], content=r[1], timestamp=r[2]) for r in rows]
 
 
 def clear(session_id: str) -> None:
-    """Удалить историю сессии. Нужна кнопке очистки в app.py (П6)."""
-    # TODO (П5): удалить реплики сессии
-    return None
+    """Удалить историю сессии."""
+    conn = connect()
+    try:
+        conn.execute("DELETE FROM messages WHERE session_id = ?", (session_id,))
+        conn.commit()
+    finally:
+        conn.close()
